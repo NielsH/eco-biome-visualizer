@@ -76,16 +76,16 @@
 
 <script>
 "use strict";
-var COL={iron:'#b0342f',copper:'#cf6a2c',gold:'#d7a521',coal:'#4b4b48',clay:'#8a5a30'};
-var ON={iron:'Iron',copper:'Copper',gold:'Gold',coal:'Coal',clay:'Clay'};
+var COL={iron:'#b0342f',copper:'#cf6a2c',gold:'#d7a521',coal:'#4b4b48',clay:'#8a5a30',sulfur:'#bcc72e',peat:'#5a4326'};
+var ON={iron:'Iron',copper:'Copper',gold:'Gold',coal:'Coal',clay:'Clay',sulfur:'Sulfur',peat:'Peat'};
 var DISP={Grassland:'Grassland',RainForest:'Rainforest',WarmForest:'Warm forest',ColdForest:'Cold forest',Taiga:'Taiga',Tundra:'Tundra',Ice:'Ice',Desert:'Desert',ColdCoast:'Cold coast',WarmCoast:'Warm coast',Wetland:'Wetland'};
 // normalized elevation ranges from the engine (Biomes.cs); converted to Y via config water/gen height
 var ELEV={Grassland:[.02,.4],WarmForest:[.1,.5],ColdForest:[.1,.7],RainForest:[.1,.5],Desert:[.02,.2],Taiga:[.3,1],Tundra:[.4,1],Ice:[.6,1],Wetland:[.02,.3],ColdCoast:[.05,.1],WarmCoast:[.05,.1]};
 var WEIGHTF={RainForest:'RainforestWeight',WarmForest:'WarmForestWeight',ColdForest:'CoolForestWeight',Taiga:'TaigaWeight',Tundra:'TundraWeight',Ice:'IceWeight',Desert:'DesertWeight',Wetland:'WetlandWeight'};
 var ALWAYS={Grassland:1,ColdCoast:1,WarmCoast:1};
-var MATS=[['CrushedIronOreBlock','iron'],['IronOreBlock','iron'],['CrushedCopperOreBlock','copper'],['CopperOreBlock','copper'],['CrushedGoldOreBlock','gold'],['GoldOreBlock','gold'],['CrushedCoalBlock','coal'],['CoalBlock','coal'],['ClayBlock','clay']];
+var MATS=[['CrushedIronOreBlock','iron'],['IronOreBlock','iron'],['CrushedCopperOreBlock','copper'],['CopperOreBlock','copper'],['CrushedGoldOreBlock','gold'],['GoldOreBlock','gold'],['CrushedCoalBlock','coal'],['CoalBlock','coal'],['ClayBlock','clay'],['CrushedSulfurBlock','sulfur'],['SulfurBlock','sulfur'],['PeatBlock','peat']];
 var biomeOrder=['Desert','Grassland','Wetland','WarmForest','RainForest','WarmCoast','ColdCoast','ColdForest','Taiga','Tundra','Ice'];
-var oreOrder=['iron','copper','gold','coal','clay'];
+var oreOrder=['iron','copper','gold','coal','clay','sulfur','peat'];
 
 function material(t){ if(!t) return null; for(var i=0;i<MATS.length;i++) if(t.indexOf(MATS[i][0])>=0) return MATS[i][1]; return null; }
 
