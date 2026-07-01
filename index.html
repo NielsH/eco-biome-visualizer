@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eco WorldGen ore visualizer</title>
+<style>
+  :root{
+    --bg:#f7f6f2; --surf:#ffffff; --surf1:#f1efe8; --text:#1a1a18; --text2:#56554f; --muted:#8a887f;
+    --border:rgba(0,0,0,.12); --border2:rgba(0,0,0,.28); --accent:#185fa5; --water:#3987e5;
+    --radius:8px; --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#161614; --surf:#1f1e1c; --surf1:#26251f; --text:#f3f1ea; --text2:#c3c2b7; --muted:#8a887f;
+      --border:rgba(255,255,255,.14); --border2:rgba(255,255,255,.32); --accent:#5a9bdf; --water:#5a9bdf; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:var(--font); font-size:15px; line-height:1.5; padding:24px;}
+  .wrap{max-width:1240px; margin:0 auto;}
+  h1{font-size:21px; font-weight:600; margin:0 0 4px;}
+  p.sub{color:var(--text2); margin:0 0 20px; font-size:14px;}
+  #drop{border:1.5px dashed var(--border2); border-radius:12px; padding:22px; text-align:center; color:var(--text2);
+    background:var(--surf); transition:.15s; cursor:pointer;}
+  #drop.over{border-color:var(--accent); color:var(--text); background:var(--surf1);}
+  #drop strong{color:var(--text);}
+  .row{display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:14px 0;}
+  textarea{width:100%; min-height:90px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;
+    border:0.5px solid var(--border); border-radius:var(--radius); padding:10px; background:var(--surf); color:var(--text); resize:vertical;}
+  button{border:0.5px solid var(--border2); background:var(--surf); color:var(--text); padding:7px 14px;
+    border-radius:var(--radius); font-size:13px; cursor:pointer; font-family:inherit;}
+  button:hover{background:var(--surf1);}
+  button.primary{background:var(--accent); color:#fff; border-color:var(--accent);}
+  .seg{display:inline-flex; border:0.5px solid var(--border2); border-radius:var(--radius); overflow:hidden;}
+  .seg button{border:none; border-radius:0; background:transparent;}
+  .seg button.on{background:var(--surf1); font-weight:600;}
+  .lbl{font-size:12px; color:var(--text2);}
+  #meta{font-size:13px; color:var(--text2); margin:6px 0 0; min-height:18px;}
+  #err{color:#c0392b; font-size:13px; margin:8px 0; white-space:pre-wrap;}
+  #panel{display:none; margin-top:18px;}
+  #chartWrap{width:100%; overflow-x:auto; position:relative; border:0.5px solid var(--border); border-radius:12px; background:var(--surf); padding:6px 0;}
+  #tip{position:absolute; display:none; pointer-events:none; background:var(--surf); border:0.5px solid var(--border2);
+    border-radius:var(--radius); padding:8px 10px; font-size:12px; line-height:1.5; max-width:240px; z-index:5; box-shadow:0 2px 10px rgba(0,0,0,.15);}
+  #legend{display:flex; flex-wrap:wrap; gap:14px 18px; margin-top:12px; font-size:12px; color:var(--text2); align-items:center;}
+  .sw{width:12px; height:12px; border-radius:2px; display:inline-block; vertical-align:-1px; margin-right:6px;}
+  a{color:var(--accent);}
+  .foot{margin-top:22px; font-size:12px; color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Eco WorldGen ore visualizer</h1>
+  <p class="sub">Drop, upload, or paste a <code>WorldGenerator.eco</code> config to chart where each material spawns by biome and world height. Everything runs locally in your browser.</p>
+
+  <div id="drop">
+    <strong>Drop a WorldGenerator.eco file here</strong>, or <label style="color:var(--accent); cursor:pointer; text-decoration:underline">browse<input id="file" type="file" accept=".eco,.json,application/json" style="display:none"></label>
+    <div style="font-size:13px; margin-top:4px;">— or paste the JSON below —</div>
+  </div>
+  <textarea id="paste" placeholder="Paste WorldGenerator.eco JSON here, then click Generate"></textarea>
+  <div class="row"><button class="primary" id="gen">Generate chart</button></div>
+  <div id="err"></div>
+  <div id="meta"></div>
+
+  <div id="panel">
+    <div class="row">
+      <span class="lbl">Group by</span><span class="seg" id="grpT"></span>
+      <span class="lbl" style="margin-left:8px">Style</span><span class="seg" id="styT"></span>
+      <button id="expSvg" style="margin-left:auto">Export SVG</button>
+      <button id="expPng">Export PNG</button>
+    </div>
+    <div id="chartWrap"><div id="chart"></div><div id="tip"></div></div>
+    <div id="legend"></div>
+  </div>
+
+  <div class="foot">Density is a model index (deposit spawn rate × size, spread over each deposit's estimated vertical extent from its DirectionWeights), not literal blocks-per-chunk. Clay strata are approximated as flat bands. Surface heights use the config's WaterLevel &amp; MaxGenerationHeight with the engine's per-biome elevation ranges.</div>
+</div>
+
+<script>
+"use strict";
+var COL={iron:'#b0342f',copper:'#cf6a2c',gold:'#d7a521',coal:'#4b4b48',clay:'#8a5a30'};
+var ON={iron:'Iron',copper:'Copper',gold:'Gold',coal:'Coal',clay:'Clay'};
+var DISP={Grassland:'Grassland',RainForest:'Rainforest',WarmForest:'Warm forest',ColdForest:'Cold forest',Taiga:'Taiga',Tundra:'Tundra',Ice:'Ice',Desert:'Desert',ColdCoast:'Cold coast',WarmCoast:'Warm coast',Wetland:'Wetland'};
+// normalized elevation ranges from the engine (Biomes.cs); converted to Y via config water/gen height
+var ELEV={Grassland:[.02,.4],WarmForest:[.1,.5],ColdForest:[.1,.7],RainForest:[.1,.5],Desert:[.02,.2],Taiga:[.3,1],Tundra:[.4,1],Ice:[.6,1],Wetland:[.02,.3],ColdCoast:[.05,.1],WarmCoast:[.05,.1]};
+var WEIGHTF={RainForest:'RainforestWeight',WarmForest:'WarmForestWeight',ColdForest:'CoolForestWeight',Taiga:'TaigaWeight',Tundra:'TundraWeight',Ice:'IceWeight',Desert:'DesertWeight',Wetland:'WetlandWeight'};
+var ALWAYS={Grassland:1,ColdCoast:1,WarmCoast:1};
+var MATS=[['CrushedIronOreBlock','iron'],['IronOreBlock','iron'],['CrushedCopperOreBlock','copper'],['CopperOreBlock','copper'],['CrushedGoldOreBlock','gold'],['GoldOreBlock','gold'],['CrushedCoalBlock','coal'],['CoalBlock','coal'],['ClayBlock','clay']];
+var biomeOrder=['Desert','Grassland','Wetland','WarmForest','RainForest','WarmCoast','ColdCoast','ColdForest','Taiga','Tundra','Ice'];
+var oreOrder=['iron','copper','gold','coal','clay'];
+
+function material(t){ if(!t) return null; for(var i=0;i<MATS.length;i++) if(t.indexOf(MATS[i][0])>=0) return MATS[i][1]; return null; }
+
+function extract(cfg){
+  var idmap={};
+  (function idx(o){ if(o&&typeof o==='object'){ if(!Array.isArray(o)&&o['$id']) idmap[o['$id']]=o; for(var k in o) idx(o[k]); } })(cfg);
+  function deref(o){ return (o&&o['$ref']!=null)?idmap[o['$ref']]:o; }
+  function btype(bt){ bt=deref(bt); return (bt&&bt.Type)?bt.Type:''; }
+  function rng(o,k,d){ var r=o[k]; if(!r) return d; return [r.min!=null?r.min:d[0], r.max!=null?r.max:d[1]]; }
+  function meanW(o){ var dw=o.DirectionWeights||[]; if(!dw.length) return [1,1,1]; var x=0,y=0,z=0; for(var i=0;i<dw.length;i++){x+=dw[i].X||0;y+=dw[i].Y||0;z+=dw[i].Z||0;} return [x/dw.length,y/dw.length,z/dw.length]; }
+  function boost(wx,wy,wz){ wx=Math.max(wx,1e-6);wy=Math.max(wy,1e-6);wz=Math.max(wz,1e-6); return Math.pow(wy,2/3)/Math.pow(wx*wz,1/3); }
+
+  var weights=null;
+  (function find(o){ if(weights||!o||typeof o!=='object') return; if(!Array.isArray(o)&&(o.CoolForestWeight!=null||o.DesertWeight!=null)){weights=o;return;} for(var k in o) find(o[k]); })(cfg);
+
+  var WL=cfg.WaterLevel!=null?cfg.WaterLevel:60;
+  var MG=cfg.MaxGenerationHeight!=null?cfg.MaxGenerationHeight:120;
+  function surfOf(name){ var e=ELEV[name]||[.1,.5]; return [Math.round(WL+e[0]*(MG-WL)), Math.round(WL+e[1]*(MG-WL))]; }
+  function presentOf(name){ if(ALWAYS[name]) return true; if(!weights) return true; var f=WEIGHTF[name]; if(!f) return true; return (weights[f]||0)>0; }
+
+  var terr=deref(cfg.TerrainModule);
+  if(!terr||!terr.Modules) throw new Error('No TerrainModule.Modules found — is this a WorldGenerator.eco config?');
+
+  var out={};
+  function add(b,o,m){ var k=b+'|'+o; (out[k]=out[k]||[]).push(m); }
+  terr.Modules.forEach(function(bm){
+    bm=deref(bm); var name=bm.BiomeName; if(!ELEV[name]) return;
+    var dm=deref(bm.Module); var ranges=(dm&&dm.BlockDepthRanges)||[];
+    ranges.forEach(function(bdr){
+      bdr=deref(bdr);
+      var pm=material(btype(bdr.BlockType));
+      if(pm) add(name,pm,{t:'strat',a:Math.max(0,bdr.Min|0),b:Math.max(bdr.Min|0,bdr.Max|0),w:0.6});
+      (bdr.SubModules||[]).forEach(function(sm){
+        sm=deref(sm); var ty=sm['$type']||''; var mat=material(btype(sm.BlockType)); if(!mat) return;
+        if(ty.indexOf('StandardTerrainModule')>=0){ var r=rng(sm,'DepthRange',[0,200]); add(name,mat,{t:'std',a:r[0]|0,b:r[1]|0,w:sm.PercentChance!=null?sm.PercentChance:0.05}); }
+        else if(ty.indexOf('DepositTerrainModule')>=0){
+          var sr=rng(sm,'DepthRange',[0,200]), br=rng(sm,'DepositDepthRange',[0,200]);
+          var bc=rng(sm,'BlocksCountRange',[1,1]); var N=(bc[0]+bc[1])/2;
+          var mw=meanW(sm);
+          add(name,mat,{t:'dep',sa:sr[0]|0,sb:sr[1]|0,ba:Math.min(sr[0],br[0])|0,bb:Math.max(sr[1],br[1])|0,
+            w:(sm.SpawnPercentChance!=null?sm.SpawnPercentChance:0.01)*N, bo:boost(mw[0],mw[1],mw[2]), N:N});
+        }
+      });
+    });
+  });
+
+  var entries=[];
+  for(var k in out){ var p=k.split('|'); var b=p[0],o=p[1]; entries.push({bi:b,ore:o,surf:surfOf(b),on:presentOf(b),mods:out[k]}); }
+  return {entries:entries, WL:WL, MG:MG, weights:weights, info:cfg};
+}
+
+// ---- density model ----
+var Ymax=125, DMAX=210;
+function depthProfile(e){
+  var arr=new Array(DMAX+1).fill(0);
+  e.mods.forEach(function(m){
+    if(m.t==='std'||m.t==='strat'){ for(var d=Math.max(0,m.a);d<=m.b&&d<=DMAX;d++) arr[d]+=m.w; return; }
+    var ey=0.62*Math.cbrt(m.N)*m.bo, h=Math.max(1,Math.round(ey));
+    var base=new Array(DMAX+1).fill(0);
+    for(var d=Math.max(0,m.sa);d<=m.sb&&d<=DMAX;d++) base[d]=1;
+    var sm=new Array(DMAX+1).fill(0);
+    for(var d=0;d<=DMAX;d++){var acc=0,ws=0;for(var k=-h;k<=h;k++){var wk=h+1-Math.abs(k),dd=d-k;if(dd>=0&&dd<=DMAX)acc+=base[dd]*wk;ws+=wk;}sm[d]=acc/ws;}
+    for(var d2=0;d2<=DMAX;d2++){ if(d2<m.ba||d2>m.bb) sm[d2]=0; }
+    var tot=0; for(var d3=0;d3<=DMAX;d3++) tot+=sm[d3];
+    if(tot>0){ for(var d4=0;d4<=DMAX;d4++) arr[d4]+=sm[d4]/tot*m.w; }
+  });
+  return arr;
+}
+function smearY(dp,surf){var lo=surf[0],hi=surf[1],cnt=hi-lo+1,arr=[];
+  for(var Y=0;Y<=Ymax;Y++){var sum=0;for(var sft=lo;sft<=hi;sft++){var d=sft-Y;sum+=(d>=0&&d<=DMAX)?dp[d]:0;}arr.push(sum/cnt);}
+  var sm=[];for(var Y2=0;Y2<=Ymax;Y2++){var a=arr[Math.max(0,Y2-1)],b=arr[Y2],c=arr[Math.min(Ymax,Y2+1)];sm.push((a+2*b+c)/4);}return sm;}
+
+// ---- rendering ----
+var D=null, gMax=0, state={mode:'ore',style:'violin'};
+var layout=[], curW=0, plotR=0, svgEl=null, hvLine=null, hvRect=null;
+var padTop=48, sc=2.4, x0=64, subW=34, gap=14, H=0;
+function cssv(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+function buildGroups(mode){
+  var E=D.entries, groups=[];
+  if(mode==='ore'){ oreOrder.forEach(function(o){
+    var cells=E.filter(function(e){return e.ore===o;}).sort(function(a,b){return biomeOrder.indexOf(a.bi)-biomeOrder.indexOf(b.bi);});
+    if(cells.length) groups.push({label:ON[o],color:COL[o],on:true,cells:cells,sub:function(e){return DISP[e.bi]+(e.on?'':'*');}}); });}
+  else { biomeOrder.forEach(function(b){
+    var cells=E.filter(function(e){return e.bi===b;}).sort(function(a,b2){return oreOrder.indexOf(a.ore)-oreOrder.indexOf(b2.ore);});
+    if(cells.length) groups.push({label:DISP[b]+(cells[0].on?'':'*'),color:null,on:cells[0].on,cells:cells,sub:function(e){return ON[e.ore];}}); });}
+  return groups;
+}
+function py(Y){ return padTop+(Ymax-Y)*sc; }
+
+function render(){
+  if(!D) return;
+  var cT=cssv('--text'),cS=cssv('--text2'),cM=cssv('--muted'),cB=cssv('--border'),water=cssv('--water');
+  var groups=buildGroups(state.mode), MINGW=82;
+  var totalSlots=0; groups.forEach(function(g){ g.slot=Math.max(g.cells.length*subW, MINGW); totalSlots+=g.slot; });
+  curW=x0+totalSlots+(groups.length-1)*gap+14; plotR=curW-14; layout=[];
+  var maxHW=subW/2-2, barHW=10;
+  var s='<svg id="svgc" xmlns="http://www.w3.org/2000/svg" width="'+curW+'" height="'+H+'" viewBox="0 0 '+curW+' '+H+'" style="display:block;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">';
+  var step=Ymax>140?40:20, ticks=[]; for(var t=0;t<=Ymax;t+=step) ticks.push(t);
+  for(var i=0;i<ticks.length;i++){var ty=py(ticks[i]);
+    s+='<line x1="'+x0+'" y1="'+ty+'" x2="'+plotR+'" y2="'+ty+'" stroke="'+cB+'" stroke-width="1"/>';
+    s+='<text x="'+(x0-8)+'" y="'+(ty+4)+'" text-anchor="end" fill="'+cM+'" font-size="11">'+ticks[i]+'</text>';}
+  s+='<text x="12" y="'+py(Ymax*0.86)+'" fill="'+cS+'" font-size="12" transform="rotate(-90 12 '+py(Ymax*0.86)+')">World height (Y)</text>';
+  var wy=py(D.WL);
+  s+='<line x1="'+x0+'" y1="'+wy+'" x2="'+plotR+'" y2="'+wy+'" stroke="'+water+'" stroke-width="1.4" stroke-dasharray="5 4"/>';
+  s+='<text x="'+plotR+'" y="'+(wy-5)+'" text-anchor="end" fill="'+water+'" font-size="10.5">water Y'+D.WL+'</text>';
+  s+='<rect id="hvr" x="0" y="0" width="0" height="0" fill="'+cM+'" fill-opacity="0.10" style="display:none"/>';
+  var cx=x0;
+  groups.forEach(function(g){
+    var gStart=cx, slot=g.slot, cellsW=g.cells.length*subW, cellx=gStart+(slot-cellsW)/2, hcol=g.color?cT:(g.on?cT:cM);
+    s+='<text x="'+(gStart+slot/2)+'" y="20" text-anchor="middle" fill="'+hcol+'" font-size="12.5" font-weight="600">'+g.label+'</text>';
+    if(g.color) s+='<rect x="'+(cellx+4)+'" y="26" width="'+(cellsW-8)+'" height="3" rx="1.5" fill="'+g.color+'"/>';
+    else s+='<line x1="'+(cellx+4)+'" y1="27" x2="'+(cellx+cellsW-4)+'" y2="27" stroke="'+cB+'" stroke-width="1"/>';
+    var cMaxV=0; g.cells.forEach(function(e){e.prof.forEach(function(v){if(v>cMaxV)cMaxV=v;});});
+    if(cMaxV<=0)cMaxV=1;
+    g.cells.forEach(function(e){
+      var bx=cellx, scx=bx+subW/2, col=COL[e.ore], dim=e.on?1:0.5;
+      var syT=py(Math.min(e.surf[1],Ymax)),syB=py(e.surf[0]);
+      s+='<rect x="'+(bx+2)+'" y="'+syT+'" width="'+(subW-4)+'" height="'+(syB-syT)+'" fill="'+cM+'" fill-opacity="0.08"/>';
+      s+='<line x1="'+(bx+2)+'" y1="'+syT+'" x2="'+(bx+subW-2)+'" y2="'+syT+'" stroke="'+cM+'" stroke-width="1" stroke-opacity="0.35" stroke-dasharray="2 2"/>';
+      if(state.style==='violin'){
+        for(var Y=0;Y<=Ymax;Y++){var nv=e.prof[Y]/cMaxV;if(nv<=0.004)continue;var rt=Math.sqrt(nv);
+          var hw=Math.max(1.1,rt*maxHW),op=(0.26+0.6*rt)*dim,yy=py(Y)-sc/2;
+          s+='<rect x="'+(scx-hw).toFixed(1)+'" y="'+yy.toFixed(1)+'" width="'+(hw*2).toFixed(1)+'" height="'+(sc+0.5).toFixed(1)+'" fill="'+col+'" fill-opacity="'+op.toFixed(2)+'"/>';}
+      } else {
+        var ylo=1e9,yhi=-1;for(var Y2=0;Y2<=Ymax;Y2++){if(e.prof[Y2]/cMaxV>0.03){if(Y2<ylo)ylo=Y2;if(Y2>yhi)yhi=Y2;}}
+        if(yhi>0){var bt=py(yhi);s+='<rect x="'+(scx-barHW)+'" y="'+bt+'" width="'+(barHW*2)+'" height="'+(py(ylo)-bt)+'" rx="2" fill="'+col+'" fill-opacity="'+(0.82*dim).toFixed(2)+'"/>';}
+      }
+      s+='<text transform="rotate(-42 '+scx+' '+(H-28)+')" x="'+scx+'" y="'+(H-28)+'" text-anchor="end" fill="'+(e.on?cS:cM)+'" font-size="10">'+g.sub(e)+'</text>';
+      layout.push({x0:bx,x1:bx+subW,e:e,cMax:cMaxV}); cellx+=subW;
+    });
+    cx=gStart+slot+gap;
+  });
+  s+='<line id="hvl" x1="0" y1="0" x2="0" y2="0" stroke="'+cT+'" stroke-width="1" stroke-opacity="0.5" stroke-dasharray="3 3" style="display:none"/></svg>';
+  document.getElementById('chart').innerHTML=s;
+  svgEl=document.getElementById('svgc'); hvLine=document.getElementById('hvl'); hvRect=document.getElementById('hvr');
+  svgEl.addEventListener('mousemove',onMove);
+  svgEl.addEventListener('mouseleave',function(){tip.style.display='none';hvLine.style.display='none';hvRect.style.display='none';});
+}
+
+var tip,wrap;
+function onMove(e){
+  var cM=cssv('--muted'),cS=cssv('--text2');
+  var r=svgEl.getBoundingClientRect();
+  var sx=(e.clientX-r.left)*(curW/r.width), sy=(e.clientY-r.top)*(H/r.height);
+  var Y=Math.round(Ymax-(sy-padTop)/sc), col=null;
+  for(var i=0;i<layout.length;i++){if(sx>=layout[i].x0&&sx<layout[i].x1){col=layout[i];break;}}
+  if(!col||Y<0||Y>Ymax){tip.style.display='none';hvLine.style.display='none';hvRect.style.display='none';return;}
+  var en=col.e, val=en.prof[Y], gi=val/gMax*100, lp=val/col.cMax*100;
+  hvLine.setAttribute('x1',x0);hvLine.setAttribute('x2',plotR);hvLine.setAttribute('y1',py(Y));hvLine.setAttribute('y2',py(Y));hvLine.style.display='block';
+  hvRect.setAttribute('x',col.x0);hvRect.setAttribute('y',padTop);hvRect.setAttribute('width',subW);hvRect.setAttribute('height',Ymax*sc);hvRect.style.display='block';
+  var sm=(en.surf[0]+en.surf[1])/2, dep=Math.round(sm-Y);
+  var depL=dep>=0?('≈ '+dep+' blocks deep'):('~ '+(-dep)+' above surface');
+  var giTxt=gi>=1?Math.round(gi):(gi>0.05?'<1':'0'), bodyH;
+  if(gi<0.4) bodyH='<div style="color:'+cM+'">negligible '+ON[en.ore].toLowerCase()+' here</div>';
+  else bodyH='<div>Density index <span style="font-weight:600;color:'+COL[en.ore]+'">'+giTxt+'</span> / 100 <span style="color:'+cM+'">global</span></div><div style="color:'+cS+'">'+Math.round(lp)+'% of this column peak</div>';
+  var absent=en.on?'':'<div style="color:'+cM+'">* not generated on this map</div>';
+  tip.innerHTML='<div style="font-weight:600">'+DISP[en.bi]+' · '+ON[en.ore]+'</div><div style="color:'+cS+'">Y '+Y+' · '+depL+'</div>'+bodyH+absent;
+  tip.style.display='block';
+  var wr=wrap.getBoundingClientRect();
+  tip.style.left=(e.clientX-wr.left+wrap.scrollLeft+14)+'px';
+  tip.style.top=(e.clientY-wr.top+12)+'px';
+}
+
+function buildChart(){
+  Ymax=Math.max(120,Math.ceil(D.MG/20)*20); DMAX=Ymax+90;
+  H=padTop+Ymax*sc+52;
+  gMax=0;
+  D.entries.forEach(function(e){e.prof=smearY(depthProfile(e),e.surf);e.prof.forEach(function(v){if(v>gMax)gMax=v;});});
+  if(gMax<=0)gMax=1;
+  document.getElementById('panel').style.display='block';
+  render();
+}
+
+function load(txt){
+  var err=document.getElementById('err'); err.textContent='';
+  try{
+    var cfg=JSON.parse(txt.replace(/^﻿/,''));
+    D=extract(cfg);
+    if(!D.entries.length) throw new Error('Parsed OK, but found no Iron/Copper/Gold/Coal/Clay in any biome.');
+    showMeta();
+    buildChart();
+  }catch(ex){ document.getElementById('panel').style.display='none'; err.textContent='Could not read config: '+ex.message; }
+}
+function showMeta(){
+  var c=D.info, dim=c.Dimensions||{};
+  var present=Object.keys(ELEV).filter(function(b){ return D.entries.some(function(e){return e.bi===b&&e.on;}); }).map(function(b){return DISP[b];});
+  var absent=Object.keys(ELEV).filter(function(b){ return D.entries.some(function(e){return e.bi===b&&!e.on;}); }).map(function(b){return DISP[b];});
+  var m=(c.MapSizePreset?c.MapSizePreset+' ':'')+(dim.WorldWidth?dim.WorldWidth+'×'+dim.WorldLength+' ':'')+'· water Y'+D.WL+' · gen height '+D.MG;
+  m+=' · biomes with ore: '+present.join(', ');
+  if(absent.length) m+=' · defined but absent: '+absent.join(', ');
+  document.getElementById('meta').textContent=m;
+}
+
+function download(blob,name){ var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); setTimeout(function(){URL.revokeObjectURL(a.href); a.remove();},100); }
+function svgString(){
+  var svg=document.getElementById('svgc'); if(!svg) return null;
+  var clone=svg.cloneNode(true);
+  ['hvl','hvr'].forEach(function(id){var el=clone.querySelector('#'+id); if(el) el.parentNode.removeChild(el);});
+  clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
+  return new XMLSerializer().serializeToString(clone);
+}
+function exportSVG(){ var s=svgString(); if(!s) return; download(new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n'+s],{type:'image/svg+xml'}),'eco-ore-chart.svg'); }
+function exportPNG(){
+  var s=svgString(); if(!s) return; var scale=2, W=curW, Hp=H;
+  var img=new Image(), url=URL.createObjectURL(new Blob([s],{type:'image/svg+xml;charset=utf-8'}));
+  img.onload=function(){ var cv=document.createElement('canvas'); cv.width=W*scale; cv.height=Hp*scale;
+    var ctx=cv.getContext('2d'); ctx.scale(scale,scale); ctx.fillStyle=cssv('--bg')||'#fff'; ctx.fillRect(0,0,W,Hp); ctx.drawImage(img,0,0);
+    URL.revokeObjectURL(url); cv.toBlob(function(b){ if(b) download(b,'eco-ore-chart.png'); }); };
+  img.onerror=function(){ URL.revokeObjectURL(url); document.getElementById('err').textContent='PNG export failed in this browser — use Export SVG instead.'; };
+  img.src=url;
+}
+function seg(id,opts,key){var c=document.getElementById(id);c.innerHTML='';opts.forEach(function(o){var b=document.createElement('button');b.textContent=o.label;b.dataset.val=o.val;b.onclick=function(){state[key]=o.val;syncSeg();render();};c.appendChild(b);});}
+function syncSeg(){[['grpT','mode'],['styT','style']].forEach(function(p){var c=document.getElementById(p[0]);Array.prototype.forEach.call(c.children,function(b){b.className=b.dataset.val===state[p[1]]?'on':'';});});}
+
+window.addEventListener('DOMContentLoaded',function(){
+  tip=document.getElementById('tip'); wrap=document.getElementById('chartWrap');
+  seg('grpT',[{label:'Ore',val:'ore'},{label:'Biome',val:'biome'}],'mode');
+  seg('styT',[{label:'Violins',val:'violin'},{label:'Bars',val:'bars'}],'style');
+  syncSeg();
+  var legend=document.getElementById('legend'); var lg='';
+  oreOrder.forEach(function(o){ lg+='<span><span class="sw" style="background:'+COL[o]+'"></span>'+ON[o]+'</span>'; });
+  lg+='<span style="color:var(--muted)">* not on this map · widths √-scaled · hover for global density index</span>';
+  legend.innerHTML=lg;
+
+  var drop=document.getElementById('drop');
+  ['dragenter','dragover'].forEach(function(ev){ drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.add('over');}); });
+  ['dragleave','drop'].forEach(function(ev){ drop.addEventListener(ev,function(e){e.preventDefault();drop.classList.remove('over');}); });
+  drop.addEventListener('drop',function(e){ var f=e.dataTransfer.files[0]; if(f) readFile(f); });
+  document.getElementById('file').addEventListener('change',function(e){ var f=e.target.files[0]; if(f) readFile(f); });
+  document.getElementById('gen').addEventListener('click',function(){ var t=document.getElementById('paste').value.trim(); if(t) load(t); else document.getElementById('err').textContent='Paste a config first, or drop a file.'; });
+  document.getElementById('expSvg').addEventListener('click',exportSVG);
+  document.getElementById('expPng').addEventListener('click',exportPNG);
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change',function(){ if(D) render(); });
+});
+function readFile(f){ var r=new FileReader(); r.onload=function(){ document.getElementById('paste').value=r.result.length<200000?r.result:''; load(r.result); }; r.readAsText(f); }
+</script>
+</body>
+</html>
+
